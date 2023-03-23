@@ -1,22 +1,32 @@
 
 const { hash, compare, encodeToken } = require("../helpers/helper");
-const { User, Vehicle, Rent } = require("../models");
+const { User, Vehicle, Rent, sequelize,Log } = require("../models");
 const fs = require("fs");
 const excelJs = require("exceljs");
+const { Sequelize } = require("sequelize");
 class UserController {
     static async register(req, response) {
         try {
-            let { username, password, name, departement } = req.body;
-            if (!username || !password || !name || !departement) {
+            let { username, password, departement } = req.body;
+            console.log(username, password, departement)
+            if (!username || !password  || !departement) {
                 throw { required: "All input is Required" }
             }
             const user = await User.create({
                 username,
                 password: hash(password),
                 role: 'Admin',
-                name,
+
                 departement
             });
+
+            const log = await Log.create({
+                title: "Register",
+                description: 'Add User',
+                updatedBy: req.user.username,
+
+            })
+
             response.status(201).json({ id: user.id, username: user.username, role: user.role, name: user.name, departement: user.departement });
         } catch (error) {
             console.log(error);
@@ -56,7 +66,7 @@ class UserController {
                     name: "Invalid Login",
                 };
             } else {
-                const { id, username,role,departement } = user;
+                const { id, username, role, departement } = user;
                 let access_token = encodeToken({
                     id,
                     username,
@@ -84,6 +94,12 @@ class UserController {
                 category,
                 bbmConsume,
                 serviceDate
+            })
+            const log = await Log.create({
+                title: 'Vehicle',
+                description: 'Add Vehicle',
+                updatedBy: req.user.username,
+
             })
             response.status(201).json(vehicle);
         } catch (error) {
@@ -137,6 +153,13 @@ class UserController {
                     id
                 }
             })
+
+            const log = await Log.create({
+                title: "Vehicle",
+                description: 'Edit Vehicle',
+                updatedBy: req.user.username,
+
+            })
             response.status(200).json({ msg: "Success Edit Vehicle" });
         } catch (error) {
             console.log(error);
@@ -155,6 +178,12 @@ class UserController {
                     id
                 }
             })
+            const log = await Log.create({
+                title: "Vehicle",
+                description: 'Delete Vehicle',
+                updatedBy: req.user.username,
+
+            })
             response.status(200).json({ msg: "Success Delete Vehicle" });
         } catch (error) {
             console.log(error);
@@ -163,9 +192,9 @@ class UserController {
     }
     static async addRent(req, response) {
         try {
-            const { VehicleId, driver, loanDeadline,loanDate } = req.body;
-            console.log(VehicleId, driver, loanDeadline,loanDate)
-            console.log(req.user.id, "<<<<<<<<<")
+            const { VehicleId, driver, loanDeadline, loanDate } = req.body;
+            console.log(VehicleId, driver, loanDeadline, loanDate, "ini rent")
+
             if (!VehicleId || !loanDeadline || !driver || !loanDate) {
 
                 throw { required: "All input is required" }
@@ -178,6 +207,13 @@ class UserController {
                 loanDeadline,
                 loanDate
             })
+
+            const log = await Log.create({
+                title: "Rent",
+                description: 'Request New Rent',
+                updatedBy: req.user.username,
+
+            })
             response.status(201).json(rent);
         } catch (error) {
             console.log(error);
@@ -189,15 +225,34 @@ class UserController {
         }
     }
 
+
     //requestAtasanKantorCabang
-    static async requestRentKantorCabang(req, response) {
+    static async requestRent(req, response) {
         try {
-            const rent = await Rent.findAll({
-                where: {
-                    status: "Waiting approval Kantor Cabang"
-                }
-            })
-            response.status(200).json(rent);
+            if (req.user.departement === "Kantor Cabang") {
+                let rent = await Rent.findAll({
+                    include: Vehicle,
+                    where: {
+                        status: "Waiting approval Kantor Cabang"
+                    }
+                })
+                response.status(200).json({ rent: rent, user: req.user.departement });
+            } else if (req.user.departement === "Kantor Pusat") {
+                let rent = await Rent.findAll({
+                    include: Vehicle,
+                    where: {
+                        status: "Waiting approval Kantor Pusat"
+                    }
+                })
+                response.status(200).json({ rent: rent, user: req.user.departement });
+            } else {
+                let rent = await Rent.findAll({
+                    include: Vehicle,
+                })
+
+
+                response.status(200).json({ rent: rent, user: req.user.departement });
+            }
         } catch (error) {
             console.log(error);
             response.status(500).json("Internal Server Error");
@@ -206,22 +261,54 @@ class UserController {
     static async acceptRequestKantorCabang(req, response) {
         try {
             const { id } = req.params;
-            const check = await Rent.findOne({
-                where: {
-                    id
+            if (req.user.departement === "Kantor Cabang") {
+
+                const check = await Rent.findOne({
+                    where: {
+                        id
+                    }
+                })
+                if (check.status !== "Waiting approval Kantor Cabang") {
+                    throw { msg: "Request has been accepted, Waiting Kantor Pusat To Accept" }
                 }
-            })
-            if (check.status !== "Waiting approval Kantor Cabang") {
-                throw { msg: "Request has been accepted, Waiting Kantor Pusat To Accept" }
+                const rent = await Rent.update({
+                    status: "Waiting approval Kantor Pusat"
+                }, {
+                    where: {
+                        id
+                    }
+                })
+                const log = await Log.create({
+                    title: "Rent ",
+                    description: 'Accept Request Kantor Cabang',
+                    updatedBy: req.user.username,
+    
+                })
+                response.status(200).json({ msg: "Success Accept Request" });
+            } else if(req.user.departement=== "Kantor Pusat"){
+                const check = await Rent.findOne({
+                    where: {
+                        id
+                    }
+                })
+                if (check.status !== "Waiting approval Kantor Pusat") {
+                    throw { msg: "Request has been accepted" }
+                }
+                const rent = await Rent.update({
+                    status: "Accepted"
+                }, {
+                    where: {
+                        id
+                    }
+                })
+                const log = await Log.create({
+                    title: "Rent",
+                    description: 'Accept Request Kantor Pusat',
+                    updatedBy: req.user.username,
+    
+                })
+                response.status(200).json({ msg: "Success Accept Request" });
             }
-            const rent = await Rent.update({
-                status: "Waiting approval Kantor Pusat"
-            }, {
-                where: {
-                    id
-                }
-            })
-            response.status(200).json({ msg: "Success Accept Request" });
         } catch (error) {
             if (error.msg) {
                 response.status(400).json(error);
@@ -240,6 +327,12 @@ class UserController {
                     id
                 }
             })
+            const log = await Log.create({
+                title: "Rent",
+                description: 'Reject Request',
+                updatedBy: req.user.username,
+
+            })
             response.status(200).json({ msg: "Success Reject Request" });
         } catch (error) {
             response.status(500).json("Internal Server Error");
@@ -250,10 +343,13 @@ class UserController {
     static async requestRentKantorPusat(req, response) {
         try {
             const rent = await Rent.findAll({
+                include: [Vehicle],
                 where: {
                     status: "Waiting approval Kantor Pusat"
                 }
             })
+
+            
             response.status(200).json(rent);
         } catch (error) {
             console.log(error);
@@ -290,6 +386,7 @@ class UserController {
 
     static async downloadReport(req, response) {
         try {
+            console.log("masuk")
             let workbook = new excelJs.Workbook();
             let worksheet = workbook.addWorksheet("Rent History");
             worksheet.columns = [
@@ -308,9 +405,8 @@ class UserController {
             })
             let data = [];
             rent.forEach(el => {
-
-                const tanggal = (objectDate)=>{
-                     objectDate = new Date(objectDate);
+                const tanggal = (objectDate) => {
+                    objectDate = new Date(objectDate);
                     let day = objectDate.getDate();
                     let month = objectDate.getMonth();
                     let year = objectDate.getFullYear();
@@ -323,7 +419,7 @@ class UserController {
                     let date = `${day}/${month}/${year}`
                     return date
                 }
-            
+
                 data.push({
                     vehicle: el.Vehicle.name,
                     driver: el.driver,
@@ -348,6 +444,47 @@ class UserController {
             workbook.xlsx.write(response)
         } catch (error) {
             console.log(error)
+        }
+    }
+
+    static async graph(req, response) {
+        try {
+           const data = await Rent.findAll({
+                attributes: [
+                  [sequelize.fn('COUNT', sequelize.col('VehicleId')), 'count'],
+                  [sequelize.col('Vehicle.name'), 'name'],
+                  'status'
+                ],
+                include: [
+                  { 
+                    model: Vehicle,
+                    attributes: []
+                  }
+                ],
+                where: {
+                  status: 'Accepted'
+                },
+                group: ['Vehicle.name', 'status']
+              });
+              console.log(data.name)
+            response.status(200).json(data)
+        } catch (error) {
+            console.log(error)
+            response.status(500).json("Internal Server Error");
+        }
+    }
+
+    static async getLog(req,response){
+        try {
+            const log = await Log.findAll({
+                order: [
+                    ['updatedAt', 'DESC']
+                ]
+            })
+            response.status(200).json(log)
+        } catch (error) {
+            console.log(error)
+            response.status(500).json("Internal Server Error");
         }
     }
 }
